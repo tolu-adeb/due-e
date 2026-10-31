@@ -185,6 +185,8 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
     logging.getLogger("discord").setLevel(logging.INFO if args.verbose else logging.WARNING)
+    # DUE-E never uses voice, so discord.py's "PyNaCl/davey not installed" warnings are just noise
+    logging.getLogger("discord.client").setLevel(logging.INFO if args.verbose else logging.ERROR)
 
     load_dotenv()
     try:
