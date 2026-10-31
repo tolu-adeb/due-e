@@ -1,0 +1,25 @@
+# systemd unit for a VPS or the homelab.
+#   sudo cp deploy/due-e.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now due-e
+#   journalctl -u due-e -f
+[Unit]
+Description=DUE-E deadline radar (Discord bot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=duee
+WorkingDirectory=/opt/due-e
+ExecStart=/opt/due-e/.venv/bin/due-e run
+Restart=on-failure
+RestartSec=30
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/due-e/.duee
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

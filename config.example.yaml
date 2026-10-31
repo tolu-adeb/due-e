@@ -1,0 +1,90 @@
+# DUE-E config — copy to config.yaml (which is git-ignored).
+# Feed URLs are secret: anyone with a Canvas feed link can read your calendar.
+# Keep them in .env and reference them here as ${VARS}.
+
+timezone: America/Detroit
+
+discord:
+  channel_id: ${DUEE_CHANNEL_ID}   # right-click channel → Copy Channel ID (turn on Developer Mode)
+  guild_id: ${DUEE_GUILD_ID}       # optional, but makes slash commands show up instantly
+
+schedule:
+  morning: "08:00"
+  evening: "20:00"
+  weekly:
+    day: sun
+    time: "19:00"
+
+horizon_hours: 48        # how far ahead the morning/evening sweeps look
+post_when_empty: true    # post "Radar clear ✅" when nothing is due
+
+feeds:
+  # role: deadlines (default) — due dates, e.g. Canvas
+  - name: Canvas
+    url: ${CANVAS_ICS}
+  # role: plan — YOUR schedule (classes, study blocks, gym…). DUE-E treats it as busy time when
+  # scheduling prep/habits, and asks you at the end of the day which of these you actually did.
+  # Google Calendar: Settings → your calendar → "Secret address in iCal format".
+  - name: My schedule
+    url: ${PLAN_ICS}
+    role: plan
+  # - name: EECS 281 site
+  #   url: ${EECS281_ICS}
+  #   course: EECS 281     # label every item from this feed with this course
+
+filters:
+  ignore:                # regexes matched against deadline titles (case-insensitive)
+    - "office hours"
+    - "^lecture"
+    - "discussion section"
+
+# ── Tracker ─────────────────────────────────────────────────────────────────
+tracker:
+  daily_target_hours: 6        # productive hours you're aiming for Mon–Fri
+  weekend_target_hours: 3
+  waste_budget_minutes: 60     # how much mindless time per day you're OK with
+  day_start: "08:00"           # your normal waking window (scheduling + untracked-time math)
+  day_end: "23:30"
+  # Categories: the label you log is matched against these words (first match wins).
+  # kind ∈ productive | health | maintenance | leisure | waste. Leisure is NOT waste —
+  # waste is the stuff you didn't choose (scrolling). Omit this block to use the defaults.
+  # categories:
+  #   class:     {kind: productive, match: [lecture, discussion, lab section]}
+  #   study:     {kind: productive, match: [study, homework, hw, review, eecs, phys]}
+  #   project:   {kind: productive, match: [cervo, vera, due-e, abg, code]}
+  #   work:      {kind: productive, match: [handshake, masa, meeting]}
+  #   exercise:  {kind: health, match: [gym, run, lift]}
+  #   sleep:     {kind: health, match: [sleep, nap]}
+  #   meals:     {kind: maintenance, match: [breakfast, lunch, dinner]}
+  #   admin:     {kind: maintenance, match: [email, laundry, commute]}
+  #   social:    {kind: leisure, match: [friends, party]}
+  #   leisure:   {kind: leisure, match: [gaming, movie, show]}
+  #   scrolling: {kind: waste, match: [tiktok, instagram, youtube, reddit]}
+
+# ── Planner ─────────────────────────────────────────────────────────────────
+planner:
+  focus_windows: ["10:00-12:00", "14:00-17:00", "19:00-22:00"]  # used until DUE-E learns your best hours
+  block_minutes: 60
+  min_block_minutes: 30
+  buffer_minutes: 15                 # gap kept around everything
+  max_planned_minutes_per_day: 240   # never schedule more than this much prep in one day
+  habit_windows:
+    morning: "07:00-12:00"
+    afternoon: "12:00-17:00"
+    evening: "17:00-23:00"
+    any: "08:00-23:00"
+
+# ── Web app ─────────────────────────────────────────────────────────────────
+web:
+  enabled: true
+  host: 127.0.0.1        # localhost only. To reach it from your phone on the homelab, set host: 0.0.0.0
+  port: 8787             # AND a token (DUE-E refuses to start otherwise).
+  token: ${DUEE_WEB_TOKEN}
+  public_url: ${DUEE_PUBLIC_URL}   # optional: the link Discord posts use, e.g. https://duee.yourlab.net
+
+# ── Optional Claude review (weekly post + Insights tab) ─────────────────────
+ai:
+  enabled: false         # needs ANTHROPIC_API_KEY in .env; sends weekly totals only, never notes
+  model: claude-haiku-5-5
+
+data_dir: .duee          # cache, status.json and duee.sqlite3 live here

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "due-e"
+version = "0.2.0"
+description = "DUE-E — deadline radar, time tracker and planner for students"
+requires-python = ">=3.10"
+dependencies = [
+  "discord.py>=2.4",
+  "icalendar>=6",
+  "recurring-ical-events>=3",
+  "requests>=2.31",
+  "PyYAML>=6",
+  "aiohttp>=3.9",
+  "tzdata; platform_system == 'Windows'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+due-e = "duee.__main__:main"
+
+[tool.setuptools]
+packages = ["duee"]
+
+[tool.setuptools.package-data]
+duee = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

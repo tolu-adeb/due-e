@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DUE-E</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='44' fill='none' stroke='%2337f5a0' stroke-width='8'/><circle cx='50' cy='50' r='8' fill='%2337f5a0'/></svg>">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="radar" aria-hidden="true"><span class="sweep"></span></span>
+    <span class="name">DUE-E</span>
+    <span class="clock" id="clock">--:--</span>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button data-tab="today" class="active">today</button>
+    <button data-tab="planner">planner</button>
+    <button data-tab="habits">habits</button>
+    <button data-tab="insights">insights</button>
+  </nav>
+  <div class="feeds" id="feeds"></div>
+</header>
+
+<form class="cmd" id="cmd" autocomplete="off">
+  <span class="prompt">due-e&gt;</span>
+  <input id="cmd-input" spellcheck="false"
+         placeholder="1h30 eecs 281 project f4   ·   start leetcode   ·   stop f3   ·   45m tiktok #scrolling">
+  <span class="cmd-hint" id="cmd-hint">enter ↵</span>
+</form>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<main>
+  <section id="tab-today" class="tab active"></section>
+  <section id="tab-planner" class="tab"></section>
+  <section id="tab-habits" class="tab"></section>
+  <section id="tab-insights" class="tab"></section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
