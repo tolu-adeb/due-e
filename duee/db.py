@@ -69,6 +69,18 @@ CREATE TABLE IF NOT EXISTS blocks (
 );
 CREATE INDEX IF NOT EXISTS idx_blocks_day ON blocks(day);
 
+CREATE TABLE IF NOT EXISTS categories (
+    name        TEXT PRIMARY KEY,       -- your own activity types, on top of the config ones
+    kind        TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS category_keywords (
+    keyword     TEXT PRIMARY KEY,       -- labels DUE-E learned from you ("piano practice" → music)
+    category    TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS rsvps (
     ref         TEXT PRIMARY KEY,       -- cal:<uid@start> of an optional (club) event you're going to
     created_at  TEXT NOT NULL

@@ -35,10 +35,11 @@ You can always set prep hours yourself. If you change readiness on the event car
 
 | part | weight | what it measures |
 |---|---|---|
-| output | 40 | productive hours ÷ target (6h weekdays, 3h weekends) |
-| follow-through | 25 | the share of planned time you actually did (cancelled items don't count against you) |
-| waste control | 20 | full marks while you stay within your waste budget (60 min/day), dropping off as you go over |
-| deep work | 15 | the share of productive time spent in focused blocks of 45+ minutes |
+| output | 35 | productive hours ÷ target (6h weekdays, 3h weekends) — **class doesn't count here** |
+| follow-through | 20 | the share of planned non-class time you actually did (cancelled items don't count against you) |
+| waste control | 18 | full marks while you stay within your waste budget (60 min/day), dropping off as you go over |
+| class attendance | 15 | classes attended ÷ classes on your calendar (partial = half). Class is its own counter: you're expected to go, so it's tracked as attendance instead of padding your productive hours |
+| deep work | 12 | the share of productive time spent in focused blocks of 45+ minutes |
 
 **What to change.** It flags time-wasting over budget (naming the biggest sinks), late-night scrolling, fragmented work, plan items you keep skipping (and at what time of day), work happening outside your best hours, untracked time, falling short of your target, and weeks with no rest. Suggestions that overlap are only counted once in "recoverable per week".
 
@@ -88,6 +89,13 @@ stop f3                       stop it and rate your focus
 help                          show these commands
 ```
 
+**Activity types.** Every type has a *kind*: productive, class, health, maintenance, leisure or waste. To make your own:
+- In the command bar, write `#music:leisure` once. After that, `#music` works on its own.
+- In any type dropdown, pick **+ new type…**.
+- In Discord, use `/log category:music new_type_kind:leisure`.
+
+Change the type of anything already logged from the dropdown next to it. DUE-E remembers your choice, so "piano practice" files itself as music next time, and "other" disappears over time.
+
 **Daily loop:**
 1. The morning post shows deadlines and today's plan.
 2. During the day, log or time what you work on.
@@ -117,7 +125,7 @@ help                          show these commands
 
 **FIX-E** runs:
 ```bash
-pytest -q                          # 70 tests, offline, uses fixture calendars
+pytest -q                          # 79 tests, offline, uses fixture calendars
 due-e check --json                 # exit 0 = ok, 1 = degraded, 2 = down
 due-e check --feeds-only --json    # just the feeds (for CI, or when the bot isn't running)
 ```

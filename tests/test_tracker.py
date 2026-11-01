@@ -86,3 +86,41 @@ def test_confirming_a_duee_block_updates_it(due):
     due.tracker.confirm(item, "done")
     assert due.db.one("SELECT status FROM blocks WHERE id=?", (blk["id"],))["status"] == "done"
     assert due.planner.logged_prep(e["id"]) == 60  # counts toward the exam's prep
+
+
+def test_custom_types_and_learning(due):
+    t = due.tracker
+    assert t.categorize("piano practice") == "other"
+    with pytest.raises(ValueError):
+        t.add_category("music", "fun")                      # bad kind
+    with pytest.raises(ValueError):
+        t.add_category("x" * 30, "leisure")                 # too long
+    assert t.add_category("Music", "leisure") == {"name": "music", "kind": "leisure", "created": True}
+    assert due.cfg.tracker.kind_of("music") == "leisure"     # analysis sees it immediately
+    t.log("piano practice", minutes=30, category="music")
+    assert t.categorize("piano practice") == "music"         # learned — no more "other"
+    assert t.categorize("Piano  Practice session") == "music"
+
+
+def test_learned_label_overrides_default(due):
+    t = due.tracker
+    assert t.categorize("youtube lecture") in ("scrolling", "class")
+    row = t.log("youtube lecture", minutes=60)
+    t.update_activity(row["id"], category="study")
+    assert t.categorize("youtube lecture") == "study"
+    assert t.activities(DAY, DAY)[0]["category"] == "study"
+    assert t.categorize("youtube") == "scrolling"           # only the exact phrase was learned
+
+
+def test_custom_types_persist_across_restarts(due):
+    from duee.tracker import Tracker
+    due.tracker.add_category("clubs", "productive")
+    due.tracker.log("MASA meeting", minutes=60, category="clubs")
+    fresh = Tracker(due.db, due.cfg, due.now)
+    assert "clubs" in fresh.category_names() and fresh.categorize("MASA meeting") == "clubs"
+
+
+def test_recategorizing_a_calendar_item_is_remembered(due):
+    lec = _item(due, "Study 281 Project 2")
+    due.tracker.confirm(lec, "done", category="project")
+    assert due.tracker.categorize("Study 281 Project 2") == "project"

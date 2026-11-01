@@ -17,6 +17,7 @@ from pathlib import Path
 from aiohttp import web
 
 from . import ai, render
+from .config import KINDS
 from .app import DueE
 from .tracker import iso
 
@@ -132,6 +133,7 @@ def build_app(due: DueE) -> web.Application:
             "deadlines": [_item_json(i) for i in due.radar.upcoming(days=7)],
             "categories": [{"name": c.name, "kind": c.kind} for c in due.cfg.tracker.categories]
                           + [{"name": "other", "kind": "maintenance"}],
+            "kinds": list(KINDS),
             "day_stats": {"score": day_an["score"], "totals": day_an["totals"],
                           "by_category": day_an["by_category"]},
             "events": [{"id": e["id"], "title": e["title"]} for e in p.events()],
@@ -140,9 +142,27 @@ def build_app(due: DueE) -> web.Application:
         })
 
     # tracker
+    def _maybe_new_category(b: dict) -> None:
+        """`{category: "music", kind: "leisure"}` creates the type on the fly."""
+        if b.get("category") and b.get("kind") and b["category"] not in t.category_names():
+            b["category"] = t.add_category(b["category"], b["kind"])["name"]
+
+    @r.post("/api/categories")
+    async def add_category(request):
+        b = await _json(request)
+        return web.json_response(t.add_category(b.get("name", ""), b.get("kind", "")), status=201)
+
+    @r.patch("/api/activities/{id}")
+    async def patch_activity(request):
+        b = await _json(request)
+        _maybe_new_category(b)
+        return web.json_response(t.update_activity(int(request.match_info["id"]), category=b.get("category"),
+                                                   label=b.get("label"), focus=b.get("focus")))
+
     @r.post("/api/log")
     async def log_activity(request):
         b = await _json(request)
+        _maybe_new_category(b)
         row = t.log(b.get("label", ""), minutes=b.get("minutes"), start=_dt(b.get("start"), due),
                     end=_dt(b.get("end"), due), category=b.get("category") or None, focus=b.get("focus"),
                     source="manual", event_id=b.get("event_id"), notes=b.get("notes", ""))
@@ -151,6 +171,7 @@ def build_app(due: DueE) -> web.Application:
     @r.post("/api/timer/start")
     async def timer_start(request):
         b = await _json(request)
+        _maybe_new_category(b)
         return web.json_response(t.start_timer(b.get("label", ""), b.get("category") or None, b.get("event_id")))
 
     @r.post("/api/timer/stop")
@@ -167,6 +188,7 @@ def build_app(due: DueE) -> web.Application:
     @r.post("/api/confirm")
     async def confirm(request):
         b = await _json(request)
+        _maybe_new_category(b)
         day = date.fromisoformat(b["day"]) if b.get("day") else due.now().date()
         item = next((i for i in t.review_items(day, due.radar.committed_blocks) if i["ref"] == b.get("ref")), None)
         if not item:

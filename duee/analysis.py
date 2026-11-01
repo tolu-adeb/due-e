@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 
 from .config import Config
 
-WEIGHTS = {"output": 40, "follow_through": 25, "deep_work": 15, "waste_control": 20}
+WEIGHTS = {"output": 35, "follow_through": 20, "attendance": 15, "deep_work": 12, "waste_control": 18}
 DEEP_MIN = 45          # a productive session this long (and focused) counts as deep work
 SHORT_MIN = 25         # productive sessions shorter than this are "fragments"
 SWITCH_COST_MIN = 10   # rough cost of each context switch
@@ -91,9 +91,16 @@ def analyze(activities: list[dict], confirmations: list[dict], cfg: Config,
     target_total = sum(target(d) for d in logged_days)
 
     confs = [c for c in confirmations if c["status"] != "cancelled"]
-    planned = sum(c["planned_minutes"] for c in confs)
-    honored = sum(min(c["actual_minutes"] or 0, c["planned_minutes"]) for c in confs
+    # classes are scored as attendance, not as plan follow-through (no double penalty)
+    class_confs = [c for c in confs if kind_of(c.get("category") or "") == "class"]
+    plan_confs = [c for c in confs if c not in class_confs]
+    planned = sum(c["planned_minutes"] for c in plan_confs)
+    honored = sum(min(c["actual_minutes"] or 0, c["planned_minutes"]) for c in plan_confs
                   if c["status"] in ("done", "partial"))
+    class_planned = len(class_confs)
+    class_attended = sum(1 for c in class_confs if c["status"] == "done") \
+        + 0.5 * sum(1 for c in class_confs if c["status"] == "partial")
+    class_minutes = sum(per_day[d]["class"] for d in logged_days)
 
     # ── score ────────────────────────────────────────────────────────────────
     comps: dict[str, float] = {}
@@ -104,6 +111,8 @@ def analyze(activities: list[dict], confirmations: list[dict], cfg: Config,
         comps["waste_control"] = 1.0 if avg_waste <= budget else max(0.0, 1 - (avg_waste - budget) / (2 * budget))
     if planned:
         comps["follow_through"] = honored / planned
+    if class_planned:
+        comps["attendance"] = class_attended / class_planned
     if productive:
         comps["deep_work"] = min(1.0, deep / productive / 0.6)  # 60%+ of productive time in deep blocks = full marks
     score = None
@@ -152,7 +161,19 @@ def analyze(activities: list[dict], confirmations: list[dict], cfg: Config,
                                    "Each switch costs ~10 min of ramp-up — merge them into 50–90 min blocks.",
                          "minutes_per_week": round(len(short) * SWITCH_COST_MIN * week_factor), "area": "focus"})
 
-    if len(confs) >= 3:
+    if class_planned and class_attended / class_planned < 0.9:
+        missed = Counter(c["title"] for c in class_confs if c["status"] == "skipped")
+        partial = Counter(c["title"] for c in class_confs if c["status"] == "partial")
+        fmt = lambda cnt: ", ".join(k + (f" ×{v}" if v > 1 else "") for k, v in cnt.most_common(4))
+        parts = ([f"skipped {fmt(missed)}"] if missed else []) + ([f"left early from {fmt(partial)}"] if partial else [])
+        sugg.append({"title": f"Class attendance {round(100 * class_attended / class_planned)}% "
+                              f"({class_attended:g}/{class_planned})",
+                     "detail": f"You {' and '.join(parts)}. Class time is the cheapest learning you get — a missed "
+                               "lecture usually costs 1.5–2× its length to self-teach later.",
+                     "minutes_per_week": None, "area": "class"})
+
+    if len(plan_confs) >= 3:
+        confs = plan_confs
         skipped = [c for c in confs if c["status"] == "skipped"]
         rate = len(skipped) / len(confs)
         if rate >= 0.3:
@@ -202,7 +223,7 @@ def analyze(activities: list[dict], confirmations: list[dict], cfg: Config,
     daily = []
     for d in days:
         k = per_day[d]
-        daily.append({"day": d.isoformat(), "productive": k["productive"], "waste": k["waste"],
+        daily.append({"day": d.isoformat(), "productive": k["productive"], "class": k["class"], "waste": k["waste"],
                       "health": k["health"], "maintenance": k["maintenance"], "leisure": k["leisure"],
                       "target": round(target(d)), "logged": d in logged_days})
 
@@ -211,7 +232,8 @@ def analyze(activities: list[dict], confirmations: list[dict], cfg: Config,
         "score": score,
         "components": {k: round(v * 100) for k, v in comps.items()},
         "totals": {"productive": productive, "waste": waste, "deep": deep, "target": round(target_total),
-                   "planned": planned, "honored": honored},
+                   "planned": planned, "honored": honored, "class": class_minutes,
+                   "classes_planned": class_planned, "classes_attended": class_attended},
         "by_category": [{"name": c, "kind": kind_of(c), "minutes": m, "per_day": round(m / max(1, n))}
                         for c, m in by_cat.most_common()],
         "top_wasters": [{"label": k, "minutes": v} for k, v in labels_by_kind["waste"].most_common(5)],
@@ -240,6 +262,8 @@ def summary_text(an: dict, style: str = "discord") -> str:
              f" · waste {_fmt_h(t['waste'])}"]
     if t["planned"]:
         lines.append(f"Plan follow-through {round(100 * t['honored'] / t['planned'])}%")
+    if t["classes_planned"]:
+        lines.append(f"Classes {t['classes_attended']:g}/{t['classes_planned']} attended · {_fmt_h(t['class'])} in class")
     for s in an["suggestions"][:3]:
         gain = f" (≈{_fmt_h(s['minutes_per_week'])}/wk)" if s["minutes_per_week"] else ""
         lines.append(f"• {s['title']}{gain}")

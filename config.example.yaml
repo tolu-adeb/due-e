@@ -46,10 +46,11 @@ tracker:
   day_start: "08:00"           # your normal waking window (scheduling + untracked-time math)
   day_end: "23:30"
   # Categories: the label you log is matched against these words (first match wins).
-  # kind ∈ productive | health | maintenance | leisure | waste. Leisure is NOT waste —
-  # waste is the stuff you didn't choose (scrolling). Omit this block to use the defaults.
+  # kind ∈ productive | class | health | maintenance | leisure | waste. Leisure is NOT waste —
+  # waste is the stuff you didn't choose (scrolling). "class" is tracked as attendance, not
+  # productive time. Omit this block to use the defaults. You can also create types in the web app.
   # categories:
-  #   class:     {kind: productive, match: [lecture, discussion, lab section]}
+  #   class:     {kind: class, match: [lecture, discussion, lab section]}
   #   study:     {kind: productive, match: [study, homework, hw, review, eecs, phys]}
   #   project:   {kind: productive, match: [cervo, vera, due-e, abg, code]}
   #   work:      {kind: productive, match: [handshake, masa, meeting]}

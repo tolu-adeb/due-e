@@ -13,7 +13,9 @@ import yaml
 DAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
 # kind → how the analyzer treats time in that category
-KINDS = ("productive", "health", "maintenance", "leisure", "waste")
+KINDS = ("productive", "class", "health", "maintenance", "leisure", "waste")
+# "class" is its own counter: you're expected to attend, so it's measured as attendance
+# instead of counting toward your productive-hours target.
 
 
 @dataclass
@@ -37,7 +39,7 @@ class Category:
 
 
 DEFAULT_CATEGORIES = [
-    Category("class", "productive", ["lecture", "class", "discussion", "lab section", "recitation"]),
+    Category("class", "class", ["lecture", "class", "discussion", "lab section", "recitation", "seminar"]),
     Category("study", "productive", ["study", "homework", "hw", "problem set", "pset", "review", "prep",
                                      "practice exam", "reading", "eecs", "phys", "math", "lab report"]),
     Category("project", "productive", ["project", "build", "code", "coding", "cervo", "vera", "due-e", "abg", "arduino"]),

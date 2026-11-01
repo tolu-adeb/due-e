@@ -112,6 +112,8 @@ def _tracker_section(kind: str, due: "DueE", style: render.Style) -> str:
         else:
             out.append(f"Score {an['score']}/100 · productive {_fmt_h(t['productive'])} / {_fmt_h(t['target'])}"
                        f" · waste {_fmt_h(t['waste'])}")
+        if t["classes_planned"]:
+            out.append(f"Classes {t['classes_attended']:g}/{t['classes_planned']} attended")
         pending = [i for i in due.tracker.review_items(now.date(), due.radar.committed_blocks) if not i["status"]]
         if pending:
             out.append(f"✅ {len(pending)} planned item(s) to confirm → {due.cfg.web_url}/#today")

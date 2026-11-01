@@ -4,7 +4,15 @@
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const KIND_COLOR = { productive: "var(--productive)", health: "var(--health)", maintenance: "var(--maintenance)", leisure: "var(--leisure)", waste: "var(--waste)" };
+const KIND_COLOR = { productive: "var(--productive)", class: "var(--class)", health: "var(--health)", maintenance: "var(--maintenance)", leisure: "var(--leisure)", waste: "var(--waste)" };
+const KIND_HELP = {
+  productive: "counts toward your daily target (study, projects, work)",
+  class: "attendance — you're expected to go, so it's its own counter",
+  health: "sleep, exercise, recovery",
+  maintenance: "necessary stuff — meals, errands, admin",
+  leisure: "fun you chose — not waste",
+  waste: "time you'd rather have back (scrolling…)",
+};
 
 const S = { tab: "today", day: null, state: null, insightsDays: 7, prefill: null };
 
@@ -41,7 +49,53 @@ function rel(iso) {
 }
 function addDays(isoDay, n) { const d = new Date(isoDay + "T12:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
 const dayName = (isoDay) => (isoDay === S.state?.today ? "Today" : isoDay === addDays(S.state?.today || isoDay, -1) ? "Yesterday" : dShort(isoDay + "T12:00:00"));
-const catOptions = (sel) => `<option value="">auto</option>` + (S.state?.categories || []).map((c) => `<option ${c.name === sel ? "selected" : ""}>${esc(c.name)}</option>`).join("");
+const catOptions = (sel, auto = true) => (auto ? `<option value="">auto</option>` : "")
+  + (S.state?.categories || []).map((c) => `<option ${c.name === sel ? "selected" : ""}>${esc(c.name)}</option>`).join("")
+  + `<option value="__new">+ new type…</option>`;
+
+/* ── custom activity types ── */
+function newTypeDialog(prefill = "") {
+  return new Promise((resolve) => {
+    let dlg = $("#type-dlg");
+    if (!dlg) { dlg = document.createElement("dialog"); dlg.id = "type-dlg"; document.body.appendChild(dlg); }
+    dlg.innerHTML = `<form method="dialog" class="stack">
+      <h2 class="mono" style="margin:0;font-size:13px;letter-spacing:.08em;color:var(--muted)">NEW ACTIVITY TYPE</h2>
+      <label class="f">name<input type="text" name="name" required maxlength="24" value="${esc(prefill)}" placeholder="music, reading for fun, clubs…"></label>
+      <div class="kinds">${(S.state?.kinds || Object.keys(KIND_HELP)).map((k, i) => `<label class="kind"><input type="radio" name="kind" value="${k}" ${i === 0 ? "checked" : ""}>
+        <span><b style="color:${KIND_COLOR[k]}">${k}</b><br><span class="muted">${KIND_HELP[k] || ""}</span></span></label>`).join("")}</div>
+      <div class="row"><button class="btn primary" value="ok">create</button><button class="btn ghost" value="cancel" formnovalidate>cancel</button></div>
+    </form>`;
+    dlg.onclose = async () => {
+      if (dlg.returnValue !== "ok") return resolve(null);
+      const f = Object.fromEntries(new FormData($("form", dlg)));
+      try {
+        const r = await api("/api/categories", { method: "POST", body: { name: f.name, kind: f.kind } });
+        if (!S.state.categories.some((c) => c.name === r.name)) S.state.categories.splice(-1, 0, { name: r.name, kind: r.kind });
+        toast(r.created ? `new type: ${r.name} (${r.kind})` : `${r.name} already exists`);
+        resolve(r.name);
+      } catch (e) { toast(e.message, true); resolve(null); }
+    };
+    dlg.showModal();
+    $("input[name=name]", dlg).focus();
+  });
+}
+// any category <select> offers "+ new type…"; activity rows also save the change right away
+document.addEventListener("focusin", (e) => { if (e.target.matches?.("select[data-cat]")) e.target.dataset.prev = e.target.value; });
+document.addEventListener("change", run(async (e) => {
+  const sel = e.target;
+  if (!sel.matches?.("select[data-cat]")) return;
+  if (sel.value === "__new") {
+    const name = await newTypeDialog();
+    if (!name) { sel.value = sel.dataset.prev || ""; return; }
+    if (![...sel.options].some((o) => o.value === name)) sel.add(new Option(name, name), sel.options[sel.options.length - 1]);
+    sel.value = name;
+  }
+  if (sel.dataset.actId) {
+    const r = await api(`/api/activities/${sel.dataset.actId}`, { method: "PATCH", body: { category: sel.value } });
+    toast(`${r.label} → ${r.category} · DUE-E will remember that`);
+    if (S.tab === "today") await loadToday();
+  }
+}));
 const kindOf = (cat) => (S.state?.categories || []).find((c) => c.name === cat)?.kind || "maintenance";
 
 /* ── command line ───────────────────────────────────────────── */
@@ -55,12 +109,20 @@ async function runCommand(raw) {
   if (!text) return;
   let toks = text.split(/\s+/);
   const pull = (re) => { const i = toks.findIndex((t) => re.test(t)); return i < 0 ? null : toks.splice(i, 1)[0]; };
-  const cat = pull(/^#\w+$/)?.slice(1) || null;
+  let cat = null, newKind = null;
+  const ctok = pull(/^#[\w-]+(:\w+)?$/);
+  if (ctok) {
+    [cat, newKind] = ctok.slice(1).toLowerCase().split(":");
+    const known = (S.state?.categories || []).some((c) => c.name === cat);
+    if (!known && newKind) await api("/api/categories", { method: "POST", body: { name: cat, kind: newKind } });
+    else if (!known) { cat = await newTypeDialog(cat); if (!cat) return; }
+    if (!known) S.state = null;  // reload categories on next render
+  }
   const f = pull(/^f[1-5]$/i);
   const focus = f ? +f[1] : null;
   const head = toks[0]?.toLowerCase();
   if (head === "help" || head === "?") {
-    toast("1h30 label f4 #cat  ·  start label  ·  stop f3  ·  today/planner/habits/insights");
+    toast("1h30 label f4 #type  ·  #newtype:leisure  ·  start label  ·  stop f3  ·  today/planner/habits/insights");
     return;
   }
   if (["today", "planner", "habits", "insights"].includes(head)) return switchTab(head);
@@ -96,6 +158,7 @@ async function loadToday() {
     <div class="stat"><div class="k">day score</div><div class="v">${ds.score ?? "—"}<small>${ds.score != null ? "/100" : ""}</small></div></div>
     <div class="stat"><div class="k">productive</div><div class="v">${hm(t.productive)}<small> / ${hm(t.target || 0)}</small></div></div>
     <div class="stat"><div class="k">wasted</div><div class="v" style="color:${t.waste > 60 ? "var(--red)" : "inherit"}">${hm(t.waste)}</div></div>
+    <div class="stat"><div class="k">class</div><div class="v" style="color:${t.classes_planned && t.classes_attended < t.classes_planned ? "var(--amber)" : "inherit"}">${t.classes_planned ? `${t.classes_attended}/${t.classes_planned}` : hm(t.class)}<small>${t.classes_planned ? " attended" : ""}</small></div></div>
     <div class="stat"><div class="k">plan followed</div><div class="v">${t.planned ? Math.round(100 * t.honored / t.planned) + "%" : "—"}<small> ${t.planned ? hm(t.honored) + " of " + hm(t.planned) : ""}</small></div></div>
   </div>
   <div class="grid g2">
@@ -106,7 +169,7 @@ async function loadToday() {
         <form id="log-form" class="form-grid">
           <label class="f wide">what<input type="text" name="label" required placeholder="EECS 281 project, gym, tiktok…"></label>
           <label class="f">minutes<input type="number" name="minutes" min="1" max="1440" required placeholder="45"></label>
-          <label class="f">category<select name="category">${catOptions()}</select></label>
+          <label class="f">category<select name="category" data-cat>${catOptions()}</select></label>
           <label class="f">ended at<input type="datetime-local" name="end"></label>
           <label class="f">focus<select name="focus"><option value="">—</option>${[1, 2, 3, 4, 5].map((n) => `<option>${n}</option>`).join("")}</select></label>
           <label class="f wide">counts as prep for<select name="event_id"><option value="">—</option>${st.events.map((e) => `<option value="${e.id}">${esc(e.title)}</option>`).join("")}</select></label>
@@ -118,7 +181,7 @@ async function loadToday() {
         <div class="list">${st.activities.length ? st.activities.map((a) => `
           <div class="li">
             <span class="t">${tm(a.start)}</span>
-            <div><div class="title">${esc(a.label)}<span class="tag ${kindOf(a.category)}">${esc(a.category)}</span>${a.focus ? `<span class="tag">f${a.focus}</span>` : ""}</div>
+            <div><div class="title">${esc(a.label)}<select class="cat-select tag ${kindOf(a.category)}" data-cat data-act-id="${a.id}" title="change type">${catOptions(a.category, false)}</select>${a.focus ? `<span class="tag">f${a.focus}</span>` : ""}</div>
                  <div class="sub mono">${hm(a.minutes)} · ${esc(a.source)}</div></div>
             <button class="btn sm ghost danger" data-del="${a.id}" title="delete">✕</button>
           </div>`).join("") : `<div class="empty">nothing logged yet</div>`}</div>
@@ -189,7 +252,7 @@ function reviewRow(i) {
   return `<div class="li ${st === "done" ? "done-row" : ""}" data-ref="${esc(i.ref)}" data-planned="${i.planned_minutes}">
     <span class="t">${tm(i.start)}<br><span class="dim">${hm(i.planned_minutes)}</span></span>
     <div><div class="title">${esc(i.title)}<span class="tag ${i.kind}">${i.kind === "calendar" ? "cal" : i.kind}</span></div>
-      <div class="row" style="margin-top:4px"><select style="padding:2px 6px;font-size:12px">${catOptions(i.category)}</select>
+      <div class="row" style="margin-top:4px"><select data-cat style="padding:2px 6px;font-size:12px">${catOptions(i.category, false)}</select>
       ${st === "partial" ? `<span class="mono soon" style="font-size:12px">${hm(i.actual_minutes)}</span>` : ""}</div></div>
     <div class="seg">${b("done", "✓ did it")}${b("partial", "½", "part")}${b("skipped", "✕", "skip")}${b("cancelled", "—", "cxl")}</div>
   </div>`;
@@ -204,7 +267,7 @@ function renderTimer() {
   if (!t) {
     c.innerHTML = `<h2>timer</h2>
       <form id="timer-form" class="row"><input type="text" name="label" placeholder="what are you starting?" style="flex:1" required>
-      <select name="category">${catOptions()}</select><button class="btn primary">▶ start</button></form>`;
+      <select name="category" data-cat>${catOptions()}</select><button class="btn primary">▶ start</button></form>`;
     $("#timer-form").onsubmit = run(async (ev) => {
       ev.preventDefault();
       const f = Object.fromEntries(new FormData(ev.target));
@@ -335,7 +398,7 @@ async function loadHabits() {
       <h2>add a habit</h2>
       <form id="hb-form" class="form-grid">
         <label class="f wide">habit<input type="text" name="name" required placeholder="gym, leetcode, gaming, call home…"></label>
-        <label class="f">category<select name="category">${catOptions()}</select></label>
+        <label class="f">category<select name="category" data-cat>${catOptions()}</select></label>
         <label class="f">minutes<input type="number" name="minutes" min="5" max="480" value="45"></label>
         <label class="f">times / week<select name="per_week">${[1, 2, 3, 4, 5, 6, 7].map((n) => `<option ${n === 3 ? "selected" : ""} value="${n}">${n === 7 ? "daily" : n + "×"}</option>`).join("")}</select></label>
         <label class="f">best time<select name="window">${["any", "morning", "afternoon", "evening"].map((w) => `<option>${w}</option>`).join("")}</select></label>
@@ -375,19 +438,20 @@ async function loadInsights() {
   const an = await api(`/api/insights?days=${S.insightsDays}`);
   const el = $("#tab-insights");
   const t = an.totals;
-  const maxDay = Math.max(60, ...an.daily.map((d) => d.productive + d.health + d.maintenance + d.leisure + d.waste), ...an.daily.map((d) => d.target));
+  const maxDay = Math.max(60, ...an.daily.map((d) => d.productive + d.class + d.health + d.maintenance + d.leisure + d.waste), ...an.daily.map((d) => d.target));
   const maxCat = Math.max(1, ...an.by_category.map((c) => c.minutes));
   const maxHour = Math.max(1, ...an.focus_by_hour.map((h) => h.minutes));
   const hours = Array.from({ length: 24 }, (_, h) => an.focus_by_hour.find((x) => x.hour === h));
   const R = 50, C = 2 * Math.PI * R, sc = an.score ?? 0;
   const ringColor = sc >= 75 ? "var(--green)" : sc >= 50 ? "var(--amber)" : "var(--red)";
-  const compNames = { output: "output", follow_through: "follow-through", deep_work: "deep work", waste_control: "waste control" };
+  const compNames = { output: "output", follow_through: "follow-through", attendance: "class attendance", deep_work: "deep work", waste_control: "waste control" };
   el.innerHTML = `
   <div class="row" style="margin-bottom:14px"><div class="seg">${[7, 14, 30].map((d) => `<button data-range="${d}" class="${d === S.insightsDays ? "on" : ""}">${d}d</button>`).join("")}</div>
     <span class="muted mono" style="font-size:12px">${an.range.logged_days} of ${an.range.days} days tracked</span></div>
   <div class="stats">
     <div class="stat"><div class="k">productive</div><div class="v">${hm(t.productive)}<small> / ${hm(t.target)}</small></div></div>
     <div class="stat"><div class="k">deep work</div><div class="v">${hm(t.deep)}</div></div>
+    <div class="stat"><div class="k">class</div><div class="v">${t.classes_planned ? Math.round(100 * t.classes_attended / t.classes_planned) + "%" : hm(t.class)}<small>${t.classes_planned ? ` ${t.classes_attended}/${t.classes_planned} attended` : ""}</small></div></div>
     <div class="stat"><div class="k">wasted</div><div class="v" style="color:var(--red)">${hm(t.waste)}</div></div>
     <div class="stat"><div class="k">recoverable / week</div><div class="v" style="color:var(--green)">${hm(an.recoverable_minutes_per_week)}</div></div>
   </div>
@@ -410,8 +474,8 @@ async function loadInsights() {
       <div class="card"><h2>daily breakdown <span class="spacer"></span><span class="legend">${Object.entries(KIND_COLOR).map(([k, c]) => `<span><i style="background:${c}"></i>${k}</span>`).join("")}<span><i style="background:var(--amber);height:2px"></i>target</span></span></h2>
         <div class="days">${an.daily.map((d) => `<div class="dcol" title="${d.day}: ${hm(d.productive)} productive">
           <div class="target" style="bottom:calc(${(100 * d.target) / maxDay}% * 0.86 + 18px)"></div>
-          <div class="stack-bar" style="height:${(86 * (d.productive + d.health + d.maintenance + d.leisure + d.waste)) / maxDay}%">
-            ${["productive", "health", "maintenance", "leisure", "waste"].map((k) => d[k] ? `<span style="flex:${d[k]};background:${KIND_COLOR[k]}"></span>` : "").join("")}</div>
+          <div class="stack-bar" style="height:${(86 * (d.productive + d.class + d.health + d.maintenance + d.leisure + d.waste)) / maxDay}%">
+            ${["productive", "class", "health", "maintenance", "leisure", "waste"].map((k) => d[k] ? `<span style="flex:${d[k]};background:${KIND_COLOR[k]}"></span>` : "").join("")}</div>
           <div class="lbl">${an.daily.length <= 14 ? new Date(d.day + "T12:00").toLocaleDateString([], { weekday: "short" }) : d.day.slice(8)}</div></div>`).join("")}</div>
       </div>
       <div class="card"><h2>when you work · focus by hour</h2>

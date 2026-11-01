@@ -69,3 +69,39 @@ def test_best_hours_from_focus(cfg):
         acts += [act("deep", "study", 60, 10, day, focus=5), act("meh", "study", 60, 21, day, focus=2)]
     an = run(cfg, acts, days=4)
     assert an["best_hours"][0] == 10
+
+
+def _conf(title, hour, status, cat, mins=90):
+    s = datetime.combine(DAY, datetime.min.time(), tzinfo=TZ) + timedelta(hours=hour)
+    return {"title": title, "start": s.isoformat(), "planned_minutes": mins, "status": status,
+            "actual_minutes": mins if status == "done" else 0, "category": cat}
+
+
+def test_class_is_its_own_counter(cfg):
+    acts = [act("EECS 281 Lecture", "class", 90, 10), act("EECS 370 Lecture", "class", 90, 13.5),
+            act("project", "study", 60, 16)]
+    an = run(cfg, acts)
+    assert an["totals"]["productive"] == 60          # lectures don't pad your productive hours
+    assert an["totals"]["class"] == 180
+    assert an["totals"]["deep"] == 60
+    assert {c["name"]: c["kind"] for c in an["by_category"]}["class"] == "class"
+    assert an["daily"][-1]["class"] == 180
+
+
+def test_attendance_scored_separately_from_follow_through(cfg):
+    confs = [_conf("EECS 281 Lecture", 10, "done", "class"), _conf("EECS 370 Lecture", 13.5, "skipped", "class"),
+             _conf("Study block", 16, "done", "study", 60)]
+    an = run(cfg, [act("x", "study", 60, 16)], confs)
+    assert an["components"]["attendance"] == 50
+    assert an["components"]["follow_through"] == 100   # a skipped class isn't double-counted here
+    assert an["totals"]["classes_attended"] == 1 and an["totals"]["classes_planned"] == 2
+    miss = next(s for s in an["suggestions"] if s["area"] == "class")
+    assert "skipped EECS 370 Lecture" in miss["detail"] and miss["title"].startswith("Class attendance 50%")
+    assert "Classes 1/2 attended" in summary_text(an)
+
+
+def test_partial_attendance_is_flagged(cfg):
+    confs = [_conf("EECS 281 Lecture", 10, "partial", "class"), _conf("EECS 370 Lecture", 13.5, "done", "class")]
+    an = run(cfg, [act("x", "study", 60, 16)], confs)
+    miss = next(s for s in an["suggestions"] if s["area"] == "class")
+    assert "left early from EECS 281 Lecture" in miss["detail"]

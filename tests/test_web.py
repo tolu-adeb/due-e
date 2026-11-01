@@ -142,3 +142,20 @@ def test_club_events_are_opt_in(cfg, clock):
     # going also blocks the time for planning
     busy = d.planner.busy(lecture.start, lecture.end)
     assert busy and busy[0][0] <= lecture.start
+
+
+def test_custom_types_over_the_api(due):
+    async def flow(c):
+        st = await (await c.get("/api/state")).json()
+        assert "class" in st["kinds"] and any(x["name"] == "class" and x["kind"] == "class" for x in st["categories"])
+        r = await c.post("/api/log", json={"label": "guitar", "minutes": 30, "category": "music", "kind": "leisure"})
+        row = await r.json()
+        assert r.status == 201 and row["category"] == "music"
+        r = await c.post("/api/log", json={"label": "chess", "minutes": 20, "category": "boardgames"})
+        assert r.status == 400 and "create it first" in (await r.json())["error"]
+        r = await c.patch(f"/api/activities/{row['id']}", json={"category": "hobby", "kind": "leisure"})
+        assert (await r.json())["category"] == "hobby"
+        assert (await c.post("/api/categories", json={"name": "clubs", "kind": "productive"})).status == 201
+        st = await (await c.get("/api/state")).json()
+        assert {"music", "hobby", "clubs"} <= {x["name"] for x in st["categories"]}
+    call(due, flow)

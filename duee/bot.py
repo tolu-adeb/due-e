@@ -11,6 +11,7 @@ from discord import app_commands
 from . import render
 from .analysis import _fmt_h
 from .app import DueE
+from .config import KINDS
 from .scheduler import Scheduler
 
 log = logging.getLogger(__name__)
@@ -105,12 +106,21 @@ class DueeBot(discord.Client):
                                                 suppress_embeds=True)
 
         @self.tree.command(name="log", description="Log something you did (e.g. 1h30 EECS 281 project)")
-        @app_commands.describe(what="What you did", duration="45m, 1h, 1h30…", category="Leave blank to auto-detect",
+        @app_commands.describe(what="What you did", duration="45m, 1h, 1h30…",
+                               category="Leave blank to auto-detect, or type a new one",
+                               new_type_kind="Only for a NEW category: what kind of time is it?",
                                focus="How focused, 1–5")
+        @app_commands.choices(new_type_kind=[app_commands.Choice(name=k, value=k) for k in KINDS])
         @app_commands.autocomplete(category=category_autocomplete)
         async def log_cmd(interaction: discord.Interaction, what: str, duration: str, category: str | None = None,
+                          new_type_kind: app_commands.Choice[str] | None = None,
                           focus: app_commands.Range[int, 1, 5] | None = None):
             try:
+                if category and category.lower() not in tracker.category_names():
+                    if not new_type_kind:
+                        return await reply(interaction, f"⚠ '{category}' is a new type — run /log again and pick "
+                                                        "new_type_kind (productive, class, health, maintenance, leisure, waste).")
+                    category = tracker.add_category(category, new_type_kind.value)["name"]
                 row = tracker.log(what, minutes=_parse_minutes(duration), category=category, focus=focus,
                                   source="discord")
             except ValueError as e:
@@ -143,6 +153,8 @@ class DueeBot(discord.Client):
             lines.append("Nothing tracked yet." if an["score"] is None else
                          f"Score **{an['score']}**/100 · productive {_fmt_h(t['productive'])} / {_fmt_h(t['target'])}"
                          f" · waste {_fmt_h(t['waste'])}")
+            if t["classes_planned"]:
+                lines.append(f"Classes: {t['classes_attended']:g}/{t['classes_planned']} attended")
             for c in an["by_category"][:5]:
                 lines.append(f"• {c['name']}: {_fmt_h(c['minutes'])}")
             now = due.now()

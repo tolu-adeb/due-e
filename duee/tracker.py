@@ -6,11 +6,12 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Callable, Iterable
 
-from .config import Config
+from .config import KINDS, Category, Config
 from .db import DB
 from .feeds import CalBlock
 
 STATUSES = ("done", "partial", "skipped", "cancelled")
+_CAT_NAME = re.compile(r"^[a-z0-9][a-z0-9 _-]{0,23}$")
 
 
 def iso(dt: datetime) -> str:
@@ -24,9 +25,22 @@ def parse_dt(s: str) -> datetime:
 class Tracker:
     def __init__(self, db: DB, cfg: Config, clock: Callable[[], datetime]):
         self.db, self.cfg, self.clock = db, cfg, clock
+        self._load_custom()
+
+    # Your own types live in the DB and are merged into the config's list at startup, so every part
+    # of DUE-E (analysis, planner, web) sees them the same way.
+    def _load_custom(self) -> None:
+        known = {c.name for c in self.cfg.tracker.categories}
+        for row in self.db.query("SELECT * FROM categories ORDER BY created_at"):
+            if row["name"] not in known:
+                self.cfg.tracker.categories.append(Category(row["name"], row["kind"], []))
+                known.add(row["name"])
+        self._learned = [(r["keyword"], r["category"]) for r in
+                         self.db.query("SELECT keyword, category FROM category_keywords")]
+        self._learned.sort(key=lambda kc: -len(kc[0]))  # most specific phrase wins
         self._patterns = [
             (c.name, re.compile(r"\b(" + "|".join(re.escape(m) for m in c.match) + r")\b", re.IGNORECASE))
-            for c in cfg.tracker.categories if c.match
+            for c in self.cfg.tracker.categories if c.match
         ]
 
     def now(self) -> datetime:
@@ -34,6 +48,10 @@ class Tracker:
 
     # ── categories ────────────────────────────────────────────────────────────
     def categorize(self, label: str) -> str:
+        low = " ".join(label.lower().split())
+        for kw, cat in self._learned:  # what you taught DUE-E beats the defaults
+            if re.search(r"\b" + re.escape(kw) + r"\b", low):
+                return cat
         for name, pat in self._patterns:
             if pat.search(label):
                 return name
@@ -46,8 +64,52 @@ class Tracker:
         if not category:
             return self.categorize(label)
         if category not in self.category_names():
-            raise ValueError(f"unknown category {category!r}")
+            raise ValueError(f"unknown category {category!r} — create it first (name + kind)")
         return category
+
+    def add_category(self, name: str, kind: str) -> dict:
+        name = " ".join(str(name).strip().lower().split())
+        if not _CAT_NAME.match(name):
+            raise ValueError("type name: 1–24 chars, letters/numbers/spaces/-/_")
+        if kind not in KINDS:
+            raise ValueError(f"kind must be one of {', '.join(KINDS)}")
+        if name in self.category_names():
+            existing = self.cfg.tracker.category(name)
+            return {"name": name, "kind": existing.kind if existing else "maintenance", "created": False}
+        self.db.execute("INSERT INTO categories (name, kind, created_at) VALUES (?,?,?)",
+                        (name, kind, iso(self.now())))
+        self._load_custom()
+        return {"name": name, "kind": kind, "created": True}
+
+    def learn(self, label: str, category: str) -> bool:
+        """Remember that this label means this category — only when it differs from what DUE-E would guess."""
+        phrase = " ".join(label.lower().split())
+        if not phrase or len(phrase) > 40 or category == "other" or self.categorize(label) == category:
+            return False
+        self.db.execute("INSERT INTO category_keywords (keyword, category, created_at) VALUES (?,?,?) "
+                        "ON CONFLICT(keyword) DO UPDATE SET category=excluded.category",
+                        (phrase, category, iso(self.now())))
+        self._load_custom()
+        return True
+
+    def update_activity(self, activity_id: int, category: str | None = None, label: str | None = None,
+                        focus: int | None = None) -> dict:
+        row = self.db.one("SELECT * FROM activities WHERE id=?", (activity_id,))
+        if not row:
+            raise KeyError(activity_id)
+        if category is not None:
+            category = self._check_category(category, row["label"])
+            self.learn(label or row["label"], category)
+            row["category"] = category
+        if label:
+            row["label"] = label.strip()
+        if focus is not None:
+            if not 1 <= int(focus) <= 5:
+                raise ValueError("focus must be 1–5")
+            row["focus"] = int(focus)
+        self.db.execute("UPDATE activities SET category=?, label=?, focus=? WHERE id=?",
+                        (row["category"], row["label"], row["focus"], activity_id))
+        return row
 
     # ── logging ───────────────────────────────────────────────────────────────
     def log(self, label: str, minutes: int | None = None, start: datetime | None = None,
@@ -73,6 +135,10 @@ class Tracker:
         mins = int((end - start).total_seconds() // 60)
         if mins <= 0 or mins > 24 * 60:
             raise ValueError("duration must be between 1 minute and 24 hours")
+        if category:
+            category = self._check_category(category, label)
+            if source in ("manual", "discord", "timer"):
+                self.learn(label, category)
         row = {
             "label": label, "category": self._check_category(category, label),
             "start": iso(start), "end": iso(end), "minutes": mins, "day": start.date().isoformat(),
@@ -99,6 +165,8 @@ class Tracker:
                     source: str = "timer") -> dict:
         if not label.strip():
             raise ValueError("label is required")
+        if category:
+            self.learn(label, self._check_category(category, label))
         stopped = self.stop_timer()
         now = self.now()
         row = {"label": label.strip(), "category": self._check_category(category, label), "start": iso(now),
@@ -150,6 +218,8 @@ class Tracker:
             raise ValueError(f"status must be one of {', '.join(STATUSES)}")
         ref, start = item["ref"], parse_dt(item["start"])
         planned = int(item["planned_minutes"])
+        if category and item["kind"] == "calendar":  # you re-typed a calendar item → remember for next time
+            self.learn(item["title"], self._check_category(category, item["title"]))
         category = self._check_category(category or item.get("category"), item["title"])
 
         prev = self.db.one("SELECT * FROM confirmations WHERE ref=?", (ref,))
