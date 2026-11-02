@@ -99,6 +99,20 @@ CREATE TABLE IF NOT EXISTS habits (
 """
 
 
+# Columns added after v0.3 — applied in place so existing databases keep their data.
+MIGRATIONS = {
+    "events": {
+        "source": "TEXT DEFAULT 'manual'",   # manual | canvas (auto-synced from a deadlines feed)
+        "uid": "TEXT",                       # feed item uid for synced tasks
+        "url": "TEXT",
+        "est_minutes": "INTEGER",            # the reader's raw estimate (before your personal pace)
+        "reader": "TEXT",                    # JSON: what the reader understood + why
+        "user_edited": "INTEGER DEFAULT 0",  # you changed it → sync won't overwrite your edits
+        "ignored": "INTEGER DEFAULT 0",      # "not a task"
+    },
+}
+
+
 class DB:
     def __init__(self, path: Path | str):
         if str(path) != ":memory:":
@@ -107,6 +121,12 @@ class DB:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL") if str(path) != ":memory:" else None
         self._conn.executescript(SCHEMA)
+        for table, cols in MIGRATIONS.items():
+            have = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+            for col, decl in cols.items():
+                if col not in have:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        self._conn.commit()
         self._lock = threading.Lock()
 
     def query(self, sql: str, params: tuple | dict = ()) -> list[dict[str, Any]]:

@@ -13,23 +13,28 @@ It's also VERA's first patient. DUE-E writes a `status.json` heartbeat for TAL-E
 | Section | What you get |
 |---|---|
 | **Radar** (Discord) | A morning post at 8:00 (due today, due tomorrow, later in the next 48h, plus today's plan), an evening post at 20:00 (due tonight, your score so far, and a link to close out the day), and a Sunday post with the week ahead and a week review. Also `/due`. |
-| **Tracker** | Log what you did from the web app's command bar, the form, a timer, or Discord (`/log`, `/start`, `/stop`). At the end of the day, mark each item from your calendar and DUE-E's own blocks as ✓ did it / ½ partial / ✕ skipped / — cancelled. |
+| **Tracker** | Log what you did from the web app's command bar, the form, a timer, or Discord (`/log`, `/start`, `/stop`). Work you log is matched to the task it's for ("1h 281 project 2" counts toward Project 2). At the end of the day, mark classes under **Attendance** (✓ went / ½ left early / ✕ missed / — cancelled) and everything else under **Planned** (✓ did it / ½ / ✕ / —). |
 | **Insights** | A 0–100 *how optimal* score, where your time went, deep-work hours, which hours you focus best, and a ranked list of **what to change**, each with the hours per week it would save. Claude can optionally add a second opinion. |
-| **Planner** | Enter exams, projects, assignments, interviews and presentations. DUE-E works out whether you need prep at all. If you do, it spreads study blocks across the days before, in your best hours, without double-booking anything. Missed prep gets rescheduled. |
+| **Planner** | Canvas assignments, quizzes and exams come in on their own. The **task reader** works out what each one is and roughly how long it'll take. DUE-E then plans homework and project work time and exam study time. Deep work gets long blocks in your best hours; light work gets short off-peak blocks. Tasks with the least slack are planned first. Classes are never planned: they're always busy time and are hidden from the 7-day view unless you tick **show classes**. You can add your own exams, projects and interviews too. Missed work gets rescheduled. |
 | **Habits** | Gym 4×/week in the morning, LeetCode 5×/week, gaming 3×/week in the evening. They're placed on different days and around everything else. Leisure goes after the work, so it's guilt-free. Shows streaks and a "done for the week" check. |
 | **plan.ics** | A calendar feed of everything DUE-E planned. Subscribe to it in Google or Apple Calendar. |
 
 ## How the smart parts work
 
-**Do you need prep?** `needed = base hours for the type × difficulty × how far you are from ready`, minus prep you've already logged toward it. If that leaves under 30 minutes, nothing gets scheduled.
+**The task reader** (`duee/reader.py`). For each Canvas item it reads the title first, then the description, and works out:
+- **What it is**: exam, quiz, project, essay, presentation, lab, reading or assignment. Office hours, lectures and review sessions are recognized as *not tasks* and skipped.
+- **How big it is**: a base for the kind (exam 8h, project 10h, essay 4h, assignment 3h, quiz 1.5h, reading 1h, …). Explicit amounts override the base: "1500 words" is about 250 words/hour, "problems 1–12" is 20 min each, and so are page and chapter counts. Modifiers apply on top: *final/cumulative* ×1.4, *coding* ×1.15, *proofs* ×1.2, *group* ×0.9, *milestone/checkpoint* ×0.6, *optional* ×0.5, and the points or % of grade it's worth.
+- **Deep or light**: whether it needs focus.
 
-| type | base hours | | difficulty 1 → 5 | readiness 1 → 5 |
-|---|---|---|---|---|
-| exam 8 · project 12 · interview 5 · assignment 3 · presentation 3 · event 0 | | | 0.6× → 1.4× | 100% → 0% |
+Each task card has a one-line summary ("EECS 281 project · ~10h · deep work"). Click it to see *why*: every signal it used, how confident it is, and how the time was placed.
 
-You can always set prep hours yourself. If you change readiness on the event card, it replans.
+**It learns your pace.** When you finish tasks, DUE-E compares the time you logged with its estimate. It keeps a personal multiplier per course and kind, then per course, then per kind. The multiplier is shrunk toward 1× until there's enough history, so one weird week doesn't skew it. If 281 projects take you 1.4× longer than it guessed, the next one is planned for that.
 
-**Where blocks go.** Free time is your waking window, minus your plan calendar, other events, and blocks DUE-E already placed, with 15-minute buffers around everything. Prep is spread across days so no day gets more than its fair share (spaced practice, not cramming). It lands in your focus windows first. Once you've rated your focus a few times, DUE-E learns your real best hours and uses those instead. Prep stops 1 hour before an exam or 2 hours before a due date, an exam's last block is a **Final review**, and there's a daily cap on prep (4h by default).
+**Do you need prep?** `needed = estimate × your pace × difficulty × (1 − progress)`, minus time you've already logged toward it, minus study blocks you put on your own calendar ("Study 281 Project 2" counts). If that leaves under 30 minutes, nothing gets scheduled. You can override the hours on any card, set progress/readiness, mark a Canvas item **not a task**, or `/done` it in Discord. Each of these replans. If you edit a Canvas task, your edits are kept when Canvas re-syncs; if Canvas moves the due date and you haven't touched it, the plan follows.
+
+Optional: set `ai.read_tasks: true` to have Claude read new assignments too (it only sees the title, course and description). Its read is merged with the rules.
+
+**Where blocks go.** Free time is your waking window, minus your plan calendar, other events, and blocks DUE-E already placed, with 15-minute buffers around everything. Prep is spread across days so no day gets more than its fair share (spaced practice, not cramming). It lands in your focus windows first. Once you've rated your focus a few times, DUE-E learns your real best hours and uses those instead. Deep work (projects, exam study, essays, big assignments) gets 90-minute blocks in your best hours. If only a shorter focus window is free, the block shrinks to fit rather than spilling outside it. Light work (readings, quizzes, small homework) gets 45-minute blocks off-peak, which keeps your prime hours for the hard stuff. When something changes, every open task is replanned in order of least slack (hours of work left vs. free time before it's due), so a midterm can't take all the slots a homework due sooner needed. Work stops 1 hour before an exam or 2 hours before a due date, an exam's last block is a **Final review**, and there's a daily cap on planned work (6h by default). Anything that won't fit is flagged on the card and on Today's deadline list.
 
 **The score.** It's built from four parts. Any part with no data is left out and the rest are rescaled.
 
@@ -110,6 +115,7 @@ Change the type of anything already logged from the dropdown next to it. DUE-E r
 | `/log what duration [category] [focus]` | Log something you did |
 | `/start what` and `/stop [focus]` | Timer |
 | `/today` | Today's score, your top categories, what's still planned |
+| `/done task` | Mark a task done (autocompletes) and clear its remaining work blocks |
 | `/status` | Feed health and next post times |
 
 ![Planner](docs/planner.png)
@@ -140,7 +146,8 @@ duee/
   db.py         SQLite: activities, confirmations, events, blocks, habits
   tracker.py    logging, timers, end-of-day confirmation
   analysis.py   score, breakdowns, suggestions
-  planner.py    prep estimates, slot finding, habit scheduling, plan.ics
+  reader.py     the task reader: kind, size, deep/light, why, personal pace
+  planner.py    Canvas → tasks, work/study placement, habit scheduling, plan.ics
   ai.py         optional Claude weekly review
   web.py        aiohttp API + security middleware
   static/       the web app (vanilla JS, no build step)
@@ -152,8 +159,17 @@ duee/
 On a VPS or the homelab: `deploy/due-e.service` is a systemd unit with hardening. Keep `web.host: 127.0.0.1` and put a reverse proxy or Tailscale in front, or bind to `0.0.0.0` with a token.
 
 ## Roadmap
-- [ ] `/done <item>` to hide a deadline you've already submitted
 - [ ] Ping you for anything due within 3 hours
 - [ ] Two-way Google Calendar sync (write blocks straight into your calendar)
 - [ ] Phone shortcut / PWA for one-tap logging
-- [ ] Learn how long things actually take you, and adjust prep estimates to match
+- [x] Learn how long things actually take you, and adjust estimates to match
+- [ ] Embeddings + nearest-neighbour over your own finished tasks for better reads (see below)
+
+### Could a neural network help?
+Yes, in layers. Training one from scratch won't work: you finish a few dozen tasks a semester, and that's nowhere near enough data.
+1. **Rules** (built): good on day one, and explainable.
+2. **Personal calibration** (built): learns *your* pace per course and kind.
+3. **Pretrained sentence embeddings** (e.g. `all-MiniLM-L6-v2`, ~80 MB, runs on CPU) with k-nearest-neighbour over your past tasks. "Project 3" then inherits what Project 1 and 2 actually took, even with different wording.
+4. **A small trained head** (ridge regression or a tiny MLP over embedding + course + kind features), once there are ~50+ finished tasks with logged time.
+
+The reader is pluggable (`sync_tasks(read_fn=...)`), so layers 3–4 drop in without touching the planner.

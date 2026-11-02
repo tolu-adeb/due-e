@@ -122,6 +122,9 @@ def build_app(due: DueE) -> web.Application:
         day = _day(request, due)
         now = due.now()
         day_an = due.analyze(1, end=day)
+        tasks_by_uid = {e["uid"]: {"id": e["id"], "kind": e["kind"], "scheduled": e["prep"]["scheduled_minutes"],
+                                   "needed": e["prep"]["remaining_minutes"], "short": e["prep"]["unscheduled_minutes"]}
+                        for e in p.events() if e.get("uid")}
         return web.json_response({
             "now": iso(now), "day": day.isoformat(), "today": now.date().isoformat(),
             "timer": t.running(),
@@ -130,7 +133,7 @@ def build_app(due: DueE) -> web.Application:
             "club_events": [{"ref": c.ref, "title": c.title, "source": c.source, "start": iso(c.start),
                              "end": iso(c.end), "going": c.ref in due.radar.going}
                             for c in due.radar.optional_between(now, now + timedelta(days=7))],
-            "deadlines": [_item_json(i) for i in due.radar.upcoming(days=7)],
+            "deadlines": [{**_item_json(i), "task": tasks_by_uid.get(i.uid)} for i in due.radar.upcoming(days=7)],
             "categories": [{"name": c.name, "kind": c.kind} for c in due.cfg.tracker.categories]
                           + [{"name": "other", "kind": "maintenance"}],
             "kinds": list(KINDS),
@@ -163,16 +166,23 @@ def build_app(due: DueE) -> web.Application:
     async def log_activity(request):
         b = await _json(request)
         _maybe_new_category(b)
+        event_id = b.get("event_id")
+        if event_id is None and b.get("label"):
+            event_id = due.link_task(b["label"])  # "281 project 2" counts toward Project 2 automatically
         row = t.log(b.get("label", ""), minutes=b.get("minutes"), start=_dt(b.get("start"), due),
                     end=_dt(b.get("end"), due), category=b.get("category") or None, focus=b.get("focus"),
-                    source="manual", event_id=b.get("event_id"), notes=b.get("notes", ""))
+                    source="manual", event_id=event_id, notes=b.get("notes", ""))
+        if event_id:
+            row["task"] = p.event(event_id)["title"]
+            p.replan_event(event_id)
         return web.json_response(row, status=201)
 
     @r.post("/api/timer/start")
     async def timer_start(request):
         b = await _json(request)
         _maybe_new_category(b)
-        return web.json_response(t.start_timer(b.get("label", ""), b.get("category") or None, b.get("event_id")))
+        event_id = b.get("event_id") or due.link_task(b.get("label", ""))
+        return web.json_response(t.start_timer(b.get("label", ""), b.get("category") or None, event_id))
 
     @r.post("/api/timer/stop")
     async def timer_stop(request):
@@ -193,6 +203,8 @@ def build_app(due: DueE) -> web.Application:
         item = next((i for i in t.review_items(day, due.radar.committed_blocks) if i["ref"] == b.get("ref")), None)
         if not item:
             raise KeyError("item")
+        if item["kind"] == "calendar" and not item.get("event_id") and not item.get("is_class"):
+            item["event_id"] = due.link_task(item["title"])  # your "Study 281 P2" block counts toward Project 2
         result = t.confirm(item, b.get("status", ""), b.get("actual_minutes"), b.get("category"))
         if item["kind"] == "prep" and item.get("event_id") and result["status"] in ("partial", "skipped", "cancelled"):
             # missed prep doesn't vanish — it's rescheduled into the remaining days
@@ -236,6 +248,11 @@ def build_app(due: DueE) -> web.Application:
         result = p.replan_event(eid)
         return web.json_response({"result": result, "event": p.event(eid)})
 
+    @r.post("/api/tasks/sync")
+    async def tasks_sync(_):
+        await asyncio.to_thread(due.radar.refresh, True)
+        return web.json_response(await due.sync_tasks())
+
     @r.post("/api/replan")
     async def replan(_):
         return web.json_response(await due.replan_all())
@@ -249,13 +266,15 @@ def build_app(due: DueE) -> web.Application:
         lo = datetime.combine(start, datetime.min.time(), tzinfo=due.cfg.timezone)
         hi = lo + timedelta(days=days)
         cal = [{"ref": b.ref, "title": b.title, "start": iso(b.start), "end": iso(b.end), "kind": "calendar",
-                "source": b.source} for b in due.radar.blocks_between(lo, hi)]
+                "source": b.source, "is_class": t.cfg.tracker.kind_of(t.categorize(b.title)) == "class"}
+               for b in due.radar.blocks_between(lo, hi)]
         cal += [{"ref": b.ref, "title": f"{b.title} ({b.source})", "start": iso(b.start), "end": iso(b.end),
                  "kind": "club", "source": b.source} for b in due.radar.optional_between(lo, hi)
                 if b.ref not in due.radar.going]
         blocks = [{**b, "ref": f"block:{b['id']}"} for b in p.blocks(start, end)]
         evs = [{"id": e["id"], "title": e["title"], "kind": "event", "event_kind": e["kind"], "start": e["at"],
-                "duration": e["duration"]} for e in p.events() if start.isoformat() <= e["at"][:10] <= end.isoformat()]
+                "duration": e["duration"]} for e in p.events() if start.isoformat() <= e["at"][:10] <= end.isoformat()
+               and e.get("source") != "canvas"]  # Canvas tasks already show as "due:" deadlines
         dl = [_item_json(i) for i in due.radar.items if start <= i.due.date() <= end]
         return web.json_response({"start": start.isoformat(), "days": days, "calendar": cal, "blocks": blocks,
                                   "events": evs, "deadlines": dl})

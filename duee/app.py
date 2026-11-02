@@ -52,6 +52,22 @@ class DueE:
     async def refresh(self, force: bool = False) -> None:
         await asyncio.to_thread(self.radar.refresh, force)
         self.status.record_refresh(self.now(), self.radar.feed_results, len(self.radar.items))
+        if self.cfg.planner.auto_tasks:
+            await self.sync_tasks()
+
+    async def sync_tasks(self) -> dict:
+        """Canvas deadlines → planner tasks (reader + optional Claude), then plan what changed."""
+        from . import reader as rd
+
+        def read_fn(it):
+            return rd.merged_read(self.cfg, it.title, it.course, it.description, it.all_day)
+
+        async with self._lock:
+            return await asyncio.to_thread(self.planner.sync_tasks, self.radar.items, read_fn)
+
+    def link_task(self, label: str) -> int | None:
+        """Best guess at which task a logged activity counts toward."""
+        return self.planner.match_task(label)
 
     def analyze(self, days: int = 7, end: date | None = None) -> dict:
         end = end or self.now().date()

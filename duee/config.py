@@ -76,9 +76,13 @@ class PlannerConfig:
     focus_windows: list[tuple[time, time]] = field(
         default_factory=lambda: [(time(10), time(12)), (time(14), time(17)), (time(19), time(22))])
     block_minutes: int = 60
+    deep_block_minutes: int = 90      # projects, exam study, essays: fewer, longer sessions
+    light_block_minutes: int = 45     # readings, quizzes, prelabs: short sessions, off-peak hours
     min_block_minutes: int = 30
+    auto_tasks: bool = True           # turn Canvas deadlines into planned work automatically
+    task_lookahead_days: int = 14     # how far ahead to pull deadlines into the planner
     buffer_minutes: int = 15
-    max_planned_minutes_per_day: int = 240   # cap on DUE-E-scheduled prep per day
+    max_planned_minutes_per_day: int = 360   # cap on DUE-E-scheduled work (homework + projects + study) per day
     habit_windows: dict[str, tuple[time, time]] = field(default_factory=lambda: {
         "morning": (time(7), time(12)), "afternoon": (time(12), time(17)),
         "evening": (time(17), time(23)), "any": (time(8), time(23)),
@@ -99,6 +103,7 @@ class AiConfig:
     enabled: bool = False
     model: str = "claude-haiku-5-5"
     max_tokens: int = 900
+    read_tasks: bool = False   # also let Claude read each new assignment's description (sends that text)
 
 
 @dataclass
@@ -232,9 +237,12 @@ def load_config(path: str | Path = "config.yaml") -> Config:
     planner = PlannerConfig()
     if p.get("focus_windows"):
         planner.focus_windows = [_parse_window(w) for w in p["focus_windows"]]
-    for key in ("block_minutes", "min_block_minutes", "buffer_minutes", "max_planned_minutes_per_day"):
+    for key in ("block_minutes", "deep_block_minutes", "light_block_minutes", "min_block_minutes",
+                "buffer_minutes", "max_planned_minutes_per_day", "task_lookahead_days"):
         if key in p:
             setattr(planner, key, int(p[key]))
+    if "auto_tasks" in p:
+        planner.auto_tasks = bool(p["auto_tasks"])
     for name, w in (p.get("habit_windows") or {}).items():
         planner.habit_windows[name] = _parse_window(w)
 
@@ -251,7 +259,8 @@ def load_config(path: str | Path = "config.yaml") -> Config:
     # ── ai ──
     a = raw.get("ai", {}) or {}
     ai = AiConfig(enabled=bool(a.get("enabled", False)), model=str(a.get("model", AiConfig.model)),
-                  max_tokens=int(a.get("max_tokens", AiConfig.max_tokens)))
+                  max_tokens=int(a.get("max_tokens", AiConfig.max_tokens)),
+                  read_tasks=bool(a.get("read_tasks", False)))
 
     return Config(
         timezone=tz,

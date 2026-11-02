@@ -205,11 +205,13 @@ class Tracker:
                           "end": blk["end"], "planned_minutes": mins, "kind": blk["kind"], "source": "DUE-E",
                           "category": blk["category"], "event_id": blk["ref_id"] if blk["kind"] == "prep" else None})
         for it in items:
+            it["is_class"] = self.cfg.tracker.kind_of(it["category"]) == "class"
             c = confs.get(it["ref"])
             it["status"] = c["status"] if c else None
             it["actual_minutes"] = c["actual_minutes"] if c else None
             if c and c.get("category"):
                 it["category"] = c["category"]
+                it["is_class"] = self.cfg.tracker.kind_of(it["category"]) == "class"
         return sorted(items, key=lambda i: i["start"])
 
     def confirm(self, item: dict, status: str, actual_minutes: int | None = None,

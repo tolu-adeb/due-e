@@ -85,7 +85,8 @@ def test_confirming_a_duee_block_updates_it(due):
     item = next(i for i in due.tracker.review_items(day, due.radar.blocks) if i["ref"] == f"block:{blk['id']}")
     due.tracker.confirm(item, "done")
     assert due.db.one("SELECT status FROM blocks WHERE id=?", (blk["id"],))["status"] == "done"
-    assert due.planner.logged_prep(e["id"]) == 60  # counts toward the exam's prep
+    mins = (datetime.fromisoformat(blk["end"]) - datetime.fromisoformat(blk["start"])).seconds // 60
+    assert due.planner.logged_prep(e["id"]) == mins  # counts toward the exam's prep
 
 
 def test_custom_types_and_learning(due):

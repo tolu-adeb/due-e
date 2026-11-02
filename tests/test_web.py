@@ -159,3 +159,39 @@ def test_custom_types_over_the_api(due):
         st = await (await c.get("/api/state")).json()
         assert {"music", "hobby", "clubs"} <= {x["name"] for x in st["categories"]}
     call(due, flow)
+
+
+def test_v04_tasks_classes_and_auto_link(due):
+    async def flow(c):
+        r = await c.post("/api/tasks/sync", json={})
+        res = await r.json()
+        assert r.status == 200 and res["created"] >= 4
+
+        events = await (await c.get("/api/events")).json()
+        p2 = next(e for e in events if e["title"] == "Project 2")
+        assert p2["read"]["why"] and p2["read"]["progress_label"] == "progress" and p2["source"] == "canvas"
+
+        st = await (await c.get("/api/state")).json()
+        dl = next(d for d in st["deadlines"] if d["title"] == "Project 2")
+        assert dl["task"]["id"] == p2["id"]
+        # classes are split out for attendance
+        lecture = next(i for i in st["review"] if i["title"] == "EECS 281 Lecture")
+        assert lecture["is_class"]
+        assert not all(i["is_class"] for i in st["review"])
+
+        ag = await (await c.get("/api/agenda?days=7")).json()
+        assert any(x["is_class"] for x in ag["calendar"]) and not all(x["is_class"] for x in ag["calendar"])
+
+        # logging "281 project 2" counts toward the task without picking it
+        r = await c.post("/api/log", json={"label": "281 project 2", "minutes": 60})
+        assert (await r.json())["event_id"] == p2["id"]
+
+        # "not a task" hides it; editing the estimate replans
+        hw = next(e for e in events if e["title"] == "Homework 5")
+        r = await c.patch(f"/api/events/{hw['id']}", json={"prep_hours": 1})
+        assert r.status == 200
+        assert (await (await c.post(f"/api/events/{hw['id']}/replan", json={})).json())["event"]["prep"]["needed_minutes"] == 60
+        await c.patch(f"/api/events/{hw['id']}", json={"ignored": True})
+        events = await (await c.get("/api/events")).json()
+        assert not any(e["title"] == "Homework 5" for e in events)
+    call(due, flow)

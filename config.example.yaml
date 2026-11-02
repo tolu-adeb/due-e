@@ -68,7 +68,11 @@ planner:
   block_minutes: 60
   min_block_minutes: 30
   buffer_minutes: 15                 # gap kept around everything
-  max_planned_minutes_per_day: 240   # never schedule more than this much prep in one day
+  max_planned_minutes_per_day: 360   # never schedule more than this much work (homework + study) in one day
+  deep_block_minutes: 90             # projects / exam study / essays
+  light_block_minutes: 45            # readings, quizzes, prelabs (go in off-peak hours)
+  auto_tasks: true                   # turn Canvas deadlines into planned work automatically
+  task_lookahead_days: 14
   habit_windows:
     morning: "07:00-12:00"
     afternoon: "12:00-17:00"
@@ -86,6 +90,7 @@ web:
 # ── Optional Claude review (weekly post + Insights tab) ─────────────────────
 ai:
   enabled: false         # needs ANTHROPIC_API_KEY in .env; sends weekly totals only, never notes
+  read_tasks: false      # also let Claude read new assignments' titles + descriptions for better estimates
   model: claude-haiku-5-5
 
 data_dir: .duee          # cache, status.json and duee.sqlite3 live here

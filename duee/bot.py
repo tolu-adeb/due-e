@@ -122,16 +122,37 @@ class DueeBot(discord.Client):
                                                         "new_type_kind (productive, class, health, maintenance, leisure, waste).")
                     category = tracker.add_category(category, new_type_kind.value)["name"]
                 row = tracker.log(what, minutes=_parse_minutes(duration), category=category, focus=focus,
-                                  source="discord")
+                                  source="discord", event_id=due.link_task(what))
             except ValueError as e:
                 return await reply(interaction, f"⚠ {e}")
-            await reply(interaction, f"✓ Logged {_fmt_h(row['minutes'])} **{row['label']}** → {row['category']}")
+            task = f" · counted toward **{due.planner.event(row['event_id'])['title']}**" if row.get("event_id") else ""
+            await reply(interaction, f"✓ Logged {_fmt_h(row['minutes'])} **{row['label']}** → {row['category']}{task}")
+
+        async def task_autocomplete(_: discord.Interaction, current: str):
+            rows = due.planner._open_rows()
+            out = []
+            for e in rows:
+                name = f"{e['title']}" + (f" · {e['course']}" if e.get("course") else "")
+                if current.lower() in name.lower():
+                    out.append(app_commands.Choice(name=name[:100], value=str(e["id"])))
+            return out[:25]
+
+        @self.tree.command(name="done", description="Mark a task finished — DUE-E stops planning time for it")
+        @app_commands.autocomplete(task=task_autocomplete)
+        async def done_cmd(interaction: discord.Interaction, task: str):
+            try:
+                e = due.planner.update_event(int(task), {"done": True})
+            except (KeyError, ValueError):
+                return await reply(interaction, "⚠ Pick a task from the list.")
+            spent = due.planner.logged_prep(e["id"])
+            await reply(interaction, f"✅ **{e['title']}** done" + (f" · {_fmt_h(spent)} logged on it" if spent else "")
+                        + ". Its future blocks are cleared.")
 
         @self.tree.command(name="start", description="Start a timer")
         @app_commands.autocomplete(category=category_autocomplete)
         async def start_cmd(interaction: discord.Interaction, what: str, category: str | None = None):
             try:
-                row = tracker.start_timer(what, category, source="discord")
+                row = tracker.start_timer(what, category, due.link_task(what), source="discord")
             except ValueError as e:
                 return await reply(interaction, f"⚠ {e}")
             prev = row.get("stopped_previous")

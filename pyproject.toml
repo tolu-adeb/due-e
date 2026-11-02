@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "due-e"
-version = "0.3.0"
+version = "0.4.0"
 description = "DUE-E — deadline radar, time tracker and planner for students"
 requires-python = ">=3.10"
 dependencies = [

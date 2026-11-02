@@ -14,7 +14,7 @@ const KIND_HELP = {
   waste: "time you'd rather have back (scrolling…)",
 };
 
-const S = { tab: "today", day: null, state: null, insightsDays: 7, prefill: null };
+const S = { tab: "today", day: null, state: null, insightsDays: 7, prefill: null, showClasses: (() => { try { return !!localStorage.getItem("duee.showClasses"); } catch { return false; } })() };
 
 async function api(path, { method = "GET", body } = {}) {
   const res = await fetch(path, {
@@ -192,7 +192,13 @@ async function loadToday() {
         <h2>close out the day <span class="spacer"></span>
           <button class="btn sm ghost" data-day="-1">‹</button><span class="mono" style="color:var(--text)">${esc(dayName(st.day))}</span>
           <button class="btn sm ghost" data-day="1" ${st.day >= st.today ? "disabled" : ""}>›</button></h2>
-        <div class="list">${st.review.length ? st.review.map(reviewRow).join("") : `<div class="empty">nothing was planned — add a plan calendar feed or schedule prep in the Planner</div>`}</div>
+        ${(() => {
+          const cls = st.review.filter((i) => i.is_class), rest = st.review.filter((i) => !i.is_class);
+          if (!st.review.length) return `<div class="empty">nothing was planned — add a plan calendar feed or schedule prep in the Planner</div>`;
+          return (cls.length ? `<h3 class="sub-h">attendance <span class="dim">· not part of planning — just did you go?</span></h3>
+            <div class="list">${cls.map(attendRow).join("")}</div>` : "")
+            + (rest.length ? `<h3 class="sub-h">planned</h3><div class="list">${rest.map(reviewRow).join("")}</div>` : "");
+        })()}
       </div>
       ${st.club_events.length ? `<div class="card">
         <h2>club events · next 7 days <span class="spacer"></span><span class="dim">going = blocks time + shows in close-out</span></h2>
@@ -208,7 +214,7 @@ async function loadToday() {
           const h = (new Date(d.due) - Date.now()) / 3.6e6;
           return `<div class="dl"><div><div class="title">${d.url ? `<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.title)}</a>` : esc(d.title)}${d.course ? `<span class="tag">${esc(d.course)}</span>` : ""}</div>
             <div class="sub mono ${h < 24 ? "urgent" : h < 48 ? "soon" : "muted"}">${dShort(d.due)} ${d.all_day ? "all day" : tm(d.due)} · ${rel(d.due)}</div></div>
-            <button class="btn sm" data-plan="${i}">plan prep</button></div>`;
+            ${d.task ? taskChip(d.task) : `<button class="btn sm" data-plan="${i}">plan prep</button>`}</div>`;
         }).join("") : `<div class="empty">radar clear ✅</div>`}</div>
       </div>
     </div>
@@ -237,13 +243,30 @@ async function loadToday() {
     const row = b.closest("[data-ref]");
     let actual = null;
     if (status === "partial") {
-      const v = prompt("How many minutes did you actually do?", Math.round(+row.dataset.planned / 2));
+      const v = prompt(row.querySelector(".tag.class") ? "How many minutes were you there?" : "How many minutes did you actually do?", Math.round(+row.dataset.planned / 2));
       if (v === null) return;
       actual = parseInt(v) || null;
     }
-    await api("/api/confirm", { method: "POST", body: { ref, status, day: S.day, actual_minutes: actual, category: $("select", row).value || null } });
+    await api("/api/confirm", { method: "POST", body: { ref, status, day: S.day, actual_minutes: actual, category: $("select", row)?.value || null } });
     await loadToday();
   })));
+}
+
+function taskChip(t) {
+  const [cls, txt] = t.short ? ["urgent", `⚠ ${hm(t.short)} short`]
+    : t.scheduled ? ["ok", `${hm(t.scheduled)} planned`]
+    : t.needed ? ["soon", `${hm(t.needed)} to plan`] : ["muted", "no prep needed"];
+  return `<a class="chip ${cls}" href="#planner" title="auto-planned from Canvas — see the Planner">${txt}</a>`;
+}
+
+function attendRow(i) {
+  const st = i.status;
+  const b = (s, label, cls = "") => `<button class="${cls} ${st === s ? "on" : ""}" data-confirm="${s}" title="${s}">${label}</button>`;
+  return `<div class="li ${st === "done" ? "done-row" : ""}" data-ref="${esc(i.ref)}" data-planned="${i.planned_minutes}">
+    <span class="t">${tm(i.start)}<br><span class="dim">${hm(i.planned_minutes)}</span></span>
+    <div><div class="title">${esc(i.title)}<span class="tag class">class</span></div></div>
+    <div class="seg">${b("done", "✓ went")}${b("partial", "½ left early", "part")}${b("skipped", "✕ missed", "skip")}${b("cancelled", "— cancelled", "cxl")}</div>
+  </div>`;
 }
 
 function reviewRow(i) {
@@ -306,26 +329,29 @@ async function loadPlanner() {
       <h2>add an event, test or project</h2>
       <form id="ev-form" class="form-grid">
         <label class="f wide">title<input type="text" name="title" required value="${esc(pre?.title || "")}" placeholder="EECS 370 Midterm"></label>
-        <label class="f">type<select name="kind">${["exam", "project", "assignment", "presentation", "interview", "event"].map((k) => `<option ${k === (pre ? "assignment" : "exam") ? "selected" : ""}>${k}</option>`).join("")}</select></label>
+        <label class="f">type<select name="kind">${["exam", "quiz", "project", "assignment", "essay", "lab", "reading", "presentation", "interview", "event"].map((k) => `<option ${k === (pre ? "assignment" : "exam") ? "selected" : ""}>${k}</option>`).join("")}</select></label>
         <label class="f">course<input type="text" name="course" value="${esc(pre?.course || "")}" placeholder="EECS 370"></label>
         <label class="f wide">when / due<input type="datetime-local" name="at" required value="${pre ? localInput(pre.due) : ""}"></label>
         <label class="f">takes (min)<input type="number" name="duration" min="0" value="${pre ? 0 : ""}" placeholder="120"></label>
         <label class="f">difficulty<select name="difficulty">${[1, 2, 3, 4, 5].map((n) => `<option ${n === 3 ? "selected" : ""}>${n}</option>`).join("")}</select></label>
         <label class="f">how ready are you?<select name="readiness">${["1 · not started", "2 · a little", "3 · halfway", "4 · mostly", "5 · ready"].map((l, i) => `<option value="${i + 1}">${l}</option>`).join("")}</select></label>
-        <label class="f">prep hours (optional)<input type="number" step="0.5" min="0" name="prep_hours" placeholder="auto"></label>
+        <label class="f">work hours (optional)<input type="number" step="0.5" min="0" name="prep_hours" placeholder="auto — the reader guesses"></label>
         <label class="f wide">notes<input type="text" name="notes" placeholder="chapters 4–6, cheat sheet allowed…"></label>
         <div class="full row"><button class="btn primary">add + plan prep</button>
-          <span class="muted mono" style="font-size:12px">prep is only scheduled if you actually need it</span></div>
+          <span class="muted mono" style="font-size:12px">Canvas assignments show up here on their own · prep is only scheduled if you need it</span></div>
       </form>
     </div>
     <div class="card">
-      <h2>upcoming <span class="spacer"></span><button class="btn sm" id="replan-all">⟳ replan everything</button>
+      <h2>upcoming <span class="spacer"></span><button class="btn sm" id="sync-tasks" title="pull Canvas assignments in and plan work time">⇣ sync Canvas</button>
+        <button class="btn sm" id="replan-all">⟳ replan everything</button>
         <a class="btn sm" href="/plan.ics" title="subscribe to this in your calendar app">plan.ics</a></h2>
-      <div>${events.length ? events.map(eventCard).join("") : `<div class="empty">no events yet — add an exam or project, or hit "plan prep" on a deadline</div>`}</div>
+      ${events.length ? plannerSummary(events) : ""}
+      <div>${events.length ? events.map(eventCard).join("") : `<div class="empty">no tasks yet — sync Canvas, add an exam or project, or hit "plan prep" on a deadline</div>`}</div>
     </div>
   </div>
   <div class="card" style="margin-top:16px">
     <h2>next 7 days <span class="spacer"></span>
+      <label class="toggle" title="classes are always busy time — hidden here to keep the plan readable"><input type="checkbox" id="show-classes" ${S.showClasses ? "checked" : ""}> show classes</label>
       <span class="legend"><span><i style="background:var(--blue)"></i>your calendar</span><span><i style="background:var(--green)"></i>prep</span>
       <span><i style="background:var(--violet)"></i>habit</span><span><i style="background:none;border:1px dashed var(--muted)"></i>club (not going)</span><span><i style="background:var(--red)"></i>event</span><span><i style="background:var(--amber)"></i>deadline</span></span></h2>
     <div class="agenda">${renderAgenda(ag)}</div>
@@ -338,33 +364,65 @@ async function loadPlanner() {
     toast(e.prep.needs_prep ? `planned ${hm(e.prep.scheduled_minutes)} of prep for ${e.title}` : `${e.title}: ${e.prep.reason}`);
     await loadPlanner();
   });
+  $("#sync-tasks").onclick = run(async () => {
+    const r = await api("/api/tasks/sync", { method: "POST", body: {} });
+    toast(r.created || r.updated || r.linked ? `Canvas: ${r.created} new · ${r.updated} updated · ${r.linked} linked` : "Canvas tasks already up to date");
+    await loadPlanner();
+  });
+  $("#show-classes").onchange = (ev) => { S.showClasses = ev.target.checked; try { localStorage.setItem("duee.showClasses", S.showClasses ? "1" : ""); } catch {} $(".agenda", el).innerHTML = renderAgenda(ag); };
   $("#replan-all").onclick = run(async () => { await api("/api/replan", { method: "POST", body: {} }); toast("replanned everything"); await loadPlanner(); });
   $$("[data-ev]", el).forEach((card) => {
     const id = card.dataset.ev;
     $("[data-act=replan]", card).onclick = run(async () => { await api(`/api/events/${id}/replan`, { method: "POST", body: {} }); toast("replanned"); await loadPlanner(); });
     $("[data-act=done]", card).onclick = run(async () => { await api(`/api/events/${id}`, { method: "PATCH", body: { done: true } }); await loadPlanner(); });
     $("[data-act=del]", card).onclick = run(async () => { if (!confirm("Delete this event and its planned prep?")) return; await api(`/api/events/${id}`, { method: "DELETE" }); await loadPlanner(); });
-    $("[data-act=ready]", card).onchange = run(async (ev) => { await api(`/api/events/${id}`, { method: "PATCH", body: { readiness: +ev.target.value } }); toast("readiness updated · prep replanned"); await loadPlanner(); });
+    $("[data-act=ready]", card).onchange = run(async (ev) => { await api(`/api/events/${id}`, { method: "PATCH", body: { readiness: +ev.target.value } }); toast("updated · work time replanned"); await loadPlanner(); });
+    $("[data-act=hours]", card).onchange = run(async (ev) => {
+      const v = ev.target.value.trim();
+      await api(`/api/events/${id}`, { method: "PATCH", body: { prep_hours: v === "" ? null : +v } });
+      toast(v === "" ? "back to the reader's estimate" : `estimate set to ${v}h · replanned`); await loadPlanner();
+    });
+    const ign = $("[data-act=ignore]", card);
+    if (ign) ign.onclick = run(async () => { await api(`/api/events/${id}`, { method: "PATCH", body: { ignored: true } }); toast("hidden — it won't come back on sync"); await loadPlanner(); });
   });
 }
 
+function plannerSummary(events) {
+  const week = Date.now() + 7 * 864e5;
+  const soon = events.filter((e) => new Date(e.at) < week);
+  const need = soon.reduce((a, e) => a + (e.prep.remaining_minutes || 0), 0);
+  const sched = soon.reduce((a, e) => a + (e.prep.scheduled_minutes || 0), 0);
+  const short = events.reduce((a, e) => a + (e.prep.unscheduled_minutes || 0), 0);
+  return `<div class="plan-sum mono">this week: <b>${soon.length}</b> due · <b>${hm(need)}</b> of work left · <b>${hm(sched)}</b> scheduled
+    ${short ? `· <span class="urgent">${hm(short)} won't fit</span>` : `· <span class="ok">everything fits</span>`}</div>`;
+}
+
 function eventCard(e) {
-  const p = e.prep, need = p.needed_minutes || 0;
+  const p = e.prep, need = p.needed_minutes || 0, r = e.read || {};
   const pct = (x) => need ? Math.min(100, (100 * x) / need) : 0;
   const planned = e.blocks.filter((b) => b.status === "planned" && new Date(b.end) > Date.now());
+  const isTask = r.progress_label === "progress";
+  const levels = isTask ? ["not started", "started", "halfway", "mostly done", "basically done"] : ["not started", "a little", "halfway", "mostly", "ready"];
+  const title = e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.title)}</a>` : esc(e.title);
+  const conf = r.confidence == null ? "" : r.confidence >= 0.75 ? "sure" : r.confidence >= 0.5 ? "fairly sure" : "rough guess";
   return `<div class="ev" data-ev="${e.id}">
-    <div class="ev-head"><span class="title">${esc(e.title)}</span><span class="tag">${esc(e.kind)}</span>${e.course ? `<span class="tag">${esc(e.course)}</span>` : ""}
+    <div class="ev-head"><span class="title">${title}</span><span class="tag">${esc(e.kind)}</span>${e.course ? `<span class="tag">${esc(e.course)}</span>` : ""}
+      ${e.source === "canvas" ? `<span class="tag src">canvas</span>` : ""}${r.deep && (p.needs_prep || p.scheduled_minutes) ? `<span class="tag deep" title="needs focus — gets long blocks in your best hours">deep</span>` : ""}
       <span class="when">${dShort(e.at)} ${tm(e.at)} · ${rel(e.at)}</span></div>
+    ${r.summary || r.why?.length ? `<details class="read"><summary>${esc(r.summary || "how this was planned")}${conf ? ` <span class="dim">· ${conf}${r.source && r.source !== "rules" && r.source !== "you" ? ` · ${esc(r.source)}` : ""}</span>` : ""}</summary>
+      <ul>${(r.why || []).map((w) => `<li>${esc(w)}</li>`).join("")}</ul></details>` : ""}
     ${p.needs_prep || p.scheduled_minutes ? `
-      <div class="prep-line"><span>prep</span>
+      <div class="prep-line"><span>${isTask ? "work" : "prep"}</span>
         <div class="bar"><span style="width:${pct(p.logged_minutes)}%;background:var(--green)"></span><span style="width:${pct(p.scheduled_minutes)}%;background:var(--green-dim)"></span></div>
         <span>${hm(p.logged_minutes)} done · ${hm(p.scheduled_minutes)} planned · ${hm(need)} needed</span></div>
       ${p.unscheduled_minutes ? `<div class="warn-msg">⚠ couldn't fit ${hm(p.unscheduled_minutes)} — free up time or lower the estimate</div>` : ""}
-      ${planned.length ? `<div class="sub mono muted" style="margin-top:6px;font-size:12px">next: ${planned.slice(0, 3).map((b) => `${dShort(b.start)} ${tm(b.start)}`).join(" · ")}${planned.length > 3 ? ` +${planned.length - 3}` : ""}</div>` : ""}`
+      ${planned.length ? `<div class="sub mono muted" style="margin-top:6px;font-size:12px">next: ${planned.slice(0, 3).map((b) => `${dShort(b.start)} ${tm(b.start)}–${tm(b.end)}`).join(" · ")}${planned.length > 3 ? ` +${planned.length - 3}` : ""}</div>` : ""}`
       : `<div class="ok-msg">✓ ${esc(p.reason)}</div>`}
     <div class="ev-actions">
-      <select data-act="ready" title="how ready are you?">${["not started", "a little", "halfway", "mostly", "ready"].map((l, i) => `<option value="${i + 1}" ${e.readiness === i + 1 ? "selected" : ""}>ready: ${l}</option>`).join("")}</select>
+      <select data-act="ready" title="${isTask ? "how far along are you?" : "how ready are you?"}">${levels.map((l, i) => `<option value="${i + 1}" ${e.readiness === i + 1 ? "selected" : ""}>${r.progress_label || "readiness"}: ${l}</option>`).join("")}</select>
+      <label class="hrs" title="override the estimate (hours of work in total) — leave blank for the reader's guess"><input data-act="hours" type="number" step="0.5" min="0" value="${e.prep_hours ?? ""}" placeholder="${p.needed_hours ?? ""}">h</label>
       <button class="btn sm" data-act="replan">⟳ replan</button><button class="btn sm" data-act="done">✓ done</button>
+      ${e.source === "canvas" ? `<button class="btn sm ghost" data-act="ignore" title="not really a task (e.g. an attendance check) — hide it">not a task</button>` : ""}
       <button class="btn sm ghost danger" data-act="del">delete</button></div>
   </div>`;
 }
@@ -376,7 +434,7 @@ function renderAgenda(ag) {
     const day = addDays(ag.start, i);
     const on = (iso) => iso.slice(0, 10) === day;
     const items = [
-      ...ag.calendar.filter((c) => on(c.start)).map((c) => ({ ...c, cls: c.kind })),
+      ...ag.calendar.filter((c) => on(c.start) && (S.showClasses || !c.is_class)).map((c) => ({ ...c, cls: c.is_class ? `${c.kind} class` : c.kind })),
       ...ag.blocks.filter((b) => b.day === day).map((b) => ({ ...b, cls: `${b.kind} s-${b.status}` })),
       ...ag.events.filter((e) => on(e.start)).map((e) => ({ ...e, cls: "event", title: `${e.event_kind}: ${e.title}` })),
       ...ag.deadlines.filter((d) => on(d.due)).map((d) => ({ ...d, start: d.due, cls: "deadline", title: `due: ${d.title}` })),

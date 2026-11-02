@@ -14,7 +14,7 @@ NOW = datetime(2026, 11, 2, 8, 0, tzinfo=TZ)  # Monday morning, day after DST en
 
 @pytest.fixture
 def cfg(tmp_path) -> Config:
-    return Config(
+    c = Config(
         timezone=TZ,
         feeds=[
             Feed("Canvas", str(FIXTURES / "canvas.ics")),
@@ -24,6 +24,8 @@ def cfg(tmp_path) -> Config:
         data_dir=tmp_path / ".duee",
         channel_id=1,
     )
+    c.planner.auto_tasks = False  # tests that want Canvas → tasks turn it on explicitly
+    return c
 
 
 @pytest.fixture

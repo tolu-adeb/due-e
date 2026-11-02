@@ -36,6 +36,7 @@ class Item:
     all_day: bool
     url: str | None
     source: str
+    description: str = ""  # plain text, from the feed's DESCRIPTION (Canvas puts the assignment text here)
 
     @property
     def dedup_key(self) -> tuple[str, datetime]:
@@ -82,6 +83,19 @@ def _safe_error(exc: Exception) -> str:
     if isinstance(exc, ValueError):
         return f"invalid feed: {exc}"
     return type(exc).__name__
+
+
+_TAG = re.compile(r"<[^>]+>")
+_WS = re.compile(r"[ \t\r\f\v]+")
+
+
+def plain_text(raw: str, limit: int = 4000) -> str:
+    """HTML/ICS description → readable plain text."""
+    import html
+    text = _TAG.sub(" ", raw.replace("<br>", "\n").replace("</p>", "\n"))
+    text = html.unescape(text).replace("\\n", "\n").replace("\\,", ",")
+    lines = [_WS.sub(" ", ln).strip() for ln in text.splitlines()]
+    return "\n".join(ln for ln in lines if ln)[:limit]
 
 
 def _cache_path(feed: Feed, cache_dir: Path) -> Path:
@@ -202,6 +216,7 @@ def parse_items(text: str, feed: Feed, tz: ZoneInfo, start: datetime, end: datet
                 all_day=all_day,
                 url=str(url) if url else None,
                 source=feed.name,
+                description=plain_text(str(comp.get("DESCRIPTION", ""))),
             )
         )
     return items
